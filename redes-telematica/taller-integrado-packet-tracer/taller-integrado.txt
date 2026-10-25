@@ -1,0 +1,518 @@
+===============================================================================
+ UNIVERSIDAD CATOLICA ANDRES BELLO - TELEMATICA II
+ TALLER INTEGRADO v2  (VLSM + VOZ IP)
+ OSPF multiarea + DR/BDR | EIGRP | FRAME RELAY | BGP | TELEFONIA IP
+ Plataforma: Cisco Packet Tracer
+===============================================================================
+
+MODELOS DE EQUIPOS
+-------------------------------------------------------------------------------
+ - R1, R2, R4, R6 : router 2620XM      (OSPF/EIGRP/serial)
+ - R3, R5         : router 2811        (necesario para BGP y para Voz IP)
+ - SW_BB          : switch 2950-24     (capa 2, segmento backbone)
+ - SW1, SW4       : switch 2950-24     (LAN de datos)
+ - SW5, SW6       : switch 2960-24     (LAN de VOZ: soportan switchport voice)
+ - Telefonos      : IP Phone 7960
+ - "clock rate 56000" SOLO en el extremo DCE.
+ - Conectar cada router al puerto Fa0/24 de su switch de voz.
+
+
+===============================================================================
+ PLAN VLSM  -  BLOQUE UNICO: 192.168.10.0/24
+===============================================================================
+ Regla: se asigna de MAYOR a MENOR cantidad de hosts.
+
+ #  SUBRED              MASCARA            HOSTS   USO
+ -- ------------------- ------------------ ------- -----------------------------
+ 1  192.168.10.0/26     255.255.255.192    62      LAN1  (datos)      GW .1
+ 2  192.168.10.64/26    255.255.255.192    62      LAN5  (voz+datos)  GW .65
+ 3  192.168.10.128/27   255.255.255.224    30      LAN4  (datos)      GW .129
+ 4  192.168.10.160/27   255.255.255.224    30      LAN6  (voz+datos)  GW .161
+ 5  192.168.10.192/29   255.255.255.248    6       Backbone Area 0 (multiacceso)
+ 6  192.168.10.200/30   255.255.255.252    2       Enlace serial R1-R2
+ 7  192.168.10.204/30   255.255.255.252    2       Enlace serial R5-R6
+ 8  192.168.10.208/30   255.255.255.252    2       Enlace Frame Relay R3-R5 (BGP)
+    (192.168.10.212 - .255 quedan libres)
+
+WILDCARDS (inverso de la mascara, para OSPF/EIGRP):
+   /26 -> 0.0.0.63    /27 -> 0.0.0.31    /29 -> 0.0.0.7    /30 -> 0.0.0.3
+
+
+===============================================================================
+ TABLA DE DIRECCIONAMIENTO
+===============================================================================
+ EQUIPO  INTERFAZ  DIRECCION IP       MASCARA            AREA/AS   DCE/DTE
+ -------------------------------------------------------------------------------
+ R1      Fa0/0     192.168.10.1       255.255.255.192    Area 1    -
+ R1      Se0/0     192.168.10.201     255.255.255.252    Area 1    DCE
+ R2      Se0/0     192.168.10.202     255.255.255.252    Area 1    DTE
+ R2      Fa0/0     192.168.10.193     255.255.255.248    Area 0    -
+ R3      Fa0/0     192.168.10.194     255.255.255.248    Area 0    -
+ R3      Se0/0     192.168.10.209     255.255.255.252    BGP/FR    (Frame Relay)
+ R4      Fa0/0     192.168.10.195     255.255.255.248    Area 0    -
+ R4      Fa1/0     192.168.10.129     255.255.255.224    Area 0    -
+ R5      Fa0/0     192.168.10.65      255.255.255.192    EIGRP 10  -   (voz)
+ R5      Se0/0     192.168.10.210     255.255.255.252    BGP/FR    (Frame Relay)
+ R5      Se0/1     192.168.10.205     255.255.255.252    EIGRP 10  DCE
+ R6      Se0/1     192.168.10.206     255.255.255.252    EIGRP 10  DTE
+ R6      Fa0/0     192.168.10.161     255.255.255.224    EIGRP 10  -   (voz)
+ -------------------------------------------------------------------------------
+ Telefonos y PCs de LAN5/LAN6: obtienen IP por DHCP (no se configuran a mano).
+
+
+===============================================================================
+ PARTE 1 - CONFIGURACION BASICA + INTERFACES
+===============================================================================
+
+----------------------------- R1 ---------------------------------------------
+enable
+configure terminal
+hostname R1
+enable password red
+line console 0
+ password perro
+ login
+ exit
+line vty 0 4
+ password gato
+ login
+ exit
+interface fastethernet 0/0
+ ip address 192.168.10.1 255.255.255.192
+ no shutdown
+ exit
+interface serial 0/0
+ ip address 192.168.10.201 255.255.255.252
+ clock rate 56000
+ no shutdown
+ exit
+exit
+wr
+
+----------------------------- R2 (ABR) ---------------------------------------
+enable
+configure terminal
+hostname R2
+enable password red
+line console 0
+ password perro
+ login
+ exit
+line vty 0 4
+ password gato
+ login
+ exit
+interface serial 0/0
+ ip address 192.168.10.202 255.255.255.252
+ no shutdown
+ exit
+interface fastethernet 0/0
+ ip address 192.168.10.193 255.255.255.248
+ no shutdown
+ exit
+exit
+wr
+
+----------------------------- R3 (ASBR · FR · BGP · 2811) --------------------
+enable
+configure terminal
+hostname R3
+enable password red
+line console 0
+ password perro
+ login
+ exit
+line vty 0 4
+ password gato
+ login
+ exit
+interface fastethernet 0/0
+ ip address 192.168.10.194 255.255.255.248
+ no shutdown
+ exit
+interface serial 0/0
+ ip address 192.168.10.209 255.255.255.252
+ no shutdown
+ exit
+exit
+wr
+
+----------------------------- R4 (Area 0 + LAN4) -----------------------------
+enable
+configure terminal
+hostname R4
+enable password red
+line console 0
+ password perro
+ login
+ exit
+line vty 0 4
+ password gato
+ login
+ exit
+interface fastethernet 0/0
+ ip address 192.168.10.195 255.255.255.248
+ no shutdown
+ exit
+interface fastethernet 1/0
+ ip address 192.168.10.129 255.255.255.224
+ no shutdown
+ exit
+exit
+wr
+
+----------------------------- R5 (ASBR · FR · BGP · EIGRP · VOZ · 2811) ------
+enable
+configure terminal
+hostname R5
+enable password red
+line console 0
+ password perro
+ login
+ exit
+line vty 0 4
+ password gato
+ login
+ exit
+interface fastethernet 0/0
+ ip address 192.168.10.65 255.255.255.192
+ no shutdown
+ exit
+interface serial 0/0
+ ip address 192.168.10.210 255.255.255.252
+ no shutdown
+ exit
+interface serial 0/1
+ ip address 192.168.10.205 255.255.255.252
+ clock rate 56000
+ no shutdown
+ exit
+exit
+wr
+
+----------------------------- R6 (EIGRP · VOZ) -------------------------------
+enable
+configure terminal
+hostname R6
+enable password red
+line console 0
+ password perro
+ login
+ exit
+line vty 0 4
+ password gato
+ login
+ exit
+interface fastethernet 0/0
+ ip address 192.168.10.161 255.255.255.224
+ no shutdown
+ exit
+interface serial 0/1
+ ip address 192.168.10.206 255.255.255.252
+ no shutdown
+ exit
+exit
+wr
+
+
+===============================================================================
+ PARTE 2 - OSPF MULTIAREA + DR/BDR   (R1, R2, R3, R4)
+===============================================================================
+
+----------------------------- R1 ---------------------------------------------
+configure terminal
+router ospf 1
+ router-id 1.1.1.1
+ network 192.168.10.0 0.0.0.63 area 1
+ network 192.168.10.200 0.0.0.3 area 1
+ exit
+exit
+wr
+
+----------------------------- R2 (ABR Area1/Area0) ---------------------------
+configure terminal
+router ospf 1
+ router-id 2.2.2.2
+ network 192.168.10.200 0.0.0.3 area 1
+ network 192.168.10.192 0.0.0.7 area 0
+ exit
+exit
+interface fastethernet 0/0
+ ip ospf priority 50
+ exit
+wr
+
+----------------------------- R3 (sera DR) -----------------------------------
+configure terminal
+router ospf 1
+ router-id 3.3.3.3
+ network 192.168.10.192 0.0.0.7 area 0
+ exit
+exit
+interface fastethernet 0/0
+ ip ospf priority 100
+ exit
+wr
+
+----------------------------- R4 (DROTHER + LAN4) ----------------------------
+configure terminal
+router ospf 1
+ router-id 4.4.4.4
+ network 192.168.10.192 0.0.0.7 area 0
+ network 192.168.10.128 0.0.0.31 area 0
+ exit
+exit
+wr
+
+! Para aplicar las prioridades, en R2, R3 y R4 ejecuta:  clear ip ospf process
+! Esperado:  R3 = DR (100) , R2 = BDR (50) , R4 = DROTHER.
+! Verifica:  show ip ospf neighbor   /   show ip ospf interface fa0/0
+
+
+===============================================================================
+ PARTE 3 - FRAME RELAY  (R3 <-> R5 por la nube Cloud-PT)
+===============================================================================
+
+----------------------------- R3 ---------------------------------------------
+configure terminal
+interface serial 0/0
+ encapsulation frame-relay
+ frame-relay interface-dlci 100
+ no shutdown
+ exit
+exit
+wr
+
+----------------------------- R5 ---------------------------------------------
+configure terminal
+interface serial 0/0
+ encapsulation frame-relay
+ frame-relay interface-dlci 200
+ no shutdown
+ exit
+exit
+wr
+
+----------------------------- NUBE (Cloud-PT, por ventana GUI) ---------------
+! 1) Config > Serial0 (hacia R3): Frame Relay -> agregar DLCI 100 -> Add
+! 2) Config > Serial1 (hacia R5): Frame Relay -> agregar DLCI 200 -> Add
+! 3) Config > Frame Relay: enlazar  Serial0(100) <-> Serial1(200) -> Add
+! Prueba:  R3# ping 192.168.10.210   (debe dar !!!!! )
+
+
+===============================================================================
+ PARTE 4 - EIGRP   (R5, R6 ; AS 10)
+===============================================================================
+
+----------------------------- R5 ---------------------------------------------
+configure terminal
+router eigrp 10
+ no auto-summary
+ network 192.168.10.64 0.0.0.63
+ network 192.168.10.204 0.0.0.3
+ exit
+exit
+wr
+
+----------------------------- R6 ---------------------------------------------
+configure terminal
+router eigrp 10
+ no auto-summary
+ network 192.168.10.160 0.0.0.31
+ network 192.168.10.204 0.0.0.3
+ exit
+exit
+wr
+
+! Verifica:  show ip eigrp neighbors   /   show ip route  (rutas "D")
+
+
+===============================================================================
+ PARTE 5 - BGP (eBGP) + REDISTRIBUCION MUTUA   (R3 <-> R5)
+===============================================================================
+
+----------------------------- R3 (AS 65100) ---------------------------------
+configure terminal
+router bgp 65100
+ neighbor 192.168.10.210 remote-as 65200
+ redistribute ospf 1
+ exit
+router ospf 1
+ redistribute bgp 65100 subnets
+ exit
+exit
+wr
+
+----------------------------- R5 (AS 65200) ---------------------------------
+configure terminal
+router bgp 65200
+ neighbor 192.168.10.209 remote-as 65100
+ redistribute eigrp 10
+ exit
+router eigrp 10
+ redistribute bgp 65200 metric 10000 100 255 1 1500
+ exit
+exit
+wr
+
+! Verifica:  show ip bgp summary  (vecino "Established")  /  show ip route bgp
+
+
+===============================================================================
+ PARTE 6 - TELEFONIA IP (VOZ IP)   en LAN5 (R5) y LAN6 (R6)
+===============================================================================
+ Se usa DHCP con "option 150" (apunta al TFTP = el propio router-gateway),
+ telephony-service (CME) y dial-peer voip para llamadas entre las dos LAN.
+ Plan de numeracion:  LAN5 -> 51xx     LAN6 -> 61xx
+
+--------- R5 : DHCP + servicio de voz ----------------------------------------
+configure terminal
+ip dhcp pool VOZ5
+ network 192.168.10.64 255.255.255.192
+ default-router 192.168.10.65
+ option 150 ip 192.168.10.65
+ exit
+telephony-service
+ max-ephones 5
+ max-dn 5
+ ip source-address 192.168.10.65 port 2000
+ auto assign 1 to 5
+ exit
+ephone-dn 1
+ number 5101
+ exit
+ephone-dn 2
+ number 5102
+ exit
+exit
+wr
+
+--------- SW5 (switch de voz, puertos donde van los telefonos) ---------------
+configure terminal
+interface range fastethernet 0/1 - 5
+ switchport voice vlan 1
+ exit
+exit
+wr
+
+--------- R6 : DHCP + servicio de voz ----------------------------------------
+configure terminal
+ip dhcp pool VOZ6
+ network 192.168.10.160 255.255.255.224
+ default-router 192.168.10.161
+ option 150 ip 192.168.10.161
+ exit
+telephony-service
+ max-ephones 5
+ max-dn 5
+ ip source-address 192.168.10.161 port 2000
+ auto assign 1 to 5
+ exit
+ephone-dn 1
+ number 6101
+ exit
+ephone-dn 2
+ number 6102
+ exit
+exit
+wr
+
+--------- SW6 (switch de voz) ------------------------------------------------
+configure terminal
+interface range fastethernet 0/1 - 5
+ switchport voice vlan 1
+ exit
+exit
+wr
+
+--------- DIAL-PEER: llamadas ENTRE las dos LAN ------------------------------
+! En R5: las llamadas a numeros 6... salen hacia el gateway de LAN6 (.161)
+configure terminal
+dial-peer voice 1 voip
+ destination-pattern 6...
+ session target ipv4:192.168.10.161
+ exit
+exit
+wr
+
+! En R6: las llamadas a numeros 5... salen hacia el gateway de LAN5 (.65)
+configure terminal
+dial-peer voice 1 voip
+ destination-pattern 5...
+ session target ipv4:192.168.10.65
+ exit
+exit
+wr
+
+! PRUEBA: conecta los telefonos 7960 a los puertos fa0/1..5 del switch.
+!   - Tras unos segundos toman IP por DHCP y muestran su numero.
+!   - Llama dentro de la misma LAN (5101 -> 5102): debe conectar.
+!   - Llama entre LAN (5101 -> 6101): viaja por EIGRP y debe conectar.
+!   (Si quisieras llamar desde la zona OSPF, la conectividad ya existe
+!    gracias a la redistribucion BGP; bastaria repetir el patron dial-peer.)
+
+
+===============================================================================
+ PARTE 7 - VERIFICACION GENERAL
+===============================================================================
+show ip interface brief
+show ip route
+show ip ospf neighbor
+show ip ospf interface fa0/0
+show ip eigrp neighbors
+show ip bgp summary
+show frame-relay pvc
+show frame-relay map
+show running-config
+
+
+===============================================================================
+ APENDICE A (OPCIONAL) - ENLACE VIRTUAL OSPF
+===============================================================================
+ Agrega R7 detras de R1 formando un Area 2 (red 192.168.10.212/30) que NO toca
+ el backbone. La red no converge hasta crear el enlace virtual a traves del
+ Area 1 (area de transito), entre los router-id de R1 y R2.
+
+ En R1:
+   interface serial 0/1
+    ip address 192.168.10.213 255.255.255.252
+    clock rate 56000
+    no shutdown
+   router ospf 1
+    network 192.168.10.212 0.0.0.3 area 2
+    area 1 virtual-link 2.2.2.2
+ En R2:
+   router ospf 1
+    area 1 virtual-link 1.1.1.1
+ Verifica:  show ip ospf neighbor  (aparece vecino por interfaz "OSPF_VL0")
+
+
+===============================================================================
+ PARTE 8 - TOPOLOGIA DE PRACTICA (RETO, SIN SOLUCION)
+===============================================================================
+ Replica el ejercicio TU SOLO con OTRO bloque y otra numeracion:
+
+ BLOQUE A REPARTIR POR VLSM:  172.16.8.0/22
+
+ EXIGENCIAS:
+  * AS 200 (OSPF proc 20) con 2 areas; en Area 0 un segmento multiacceso
+    donde FUERCES que un router sea DR y otro BDR. Una LAN de 120 hosts y
+    otra de 60 hosts.
+  * AS 300 (EIGRP AS 50, no auto-summary) con dos routers y dos LAN (una de
+    200 hosts y otra de 28 hosts).
+  * Enlace FRAME RELAY (DLCI 400 / 500) entre el borde de cada AS, y eBGP
+    encima, con redistribucion mutua.
+  * VOZ IP en las dos LAN mas grandes (numeracion 7xxx y 8xxx), con DHCP +
+    option 150 + telephony-service + dial-peer.
+
+ OBJETIVOS (todos deben cumplirse):
+  [ ] VLSM: reparte 172.16.8.0/22 de mayor a menor sin solapamientos.
+  [ ] show ip ospf neighbor -> DR/BDR correctos.
+  [ ] show ip eigrp neighbors -> vecinos formados.
+  [ ] show frame-relay pvc -> PVC ACTIVE.
+  [ ] show ip bgp summary -> Established.
+  [ ] Telefono de un AS llama a telefono del otro AS y conecta.
+
+===============================================================================
+ FIN
+===============================================================================

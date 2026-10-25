@@ -1,0 +1,327 @@
+================================================================
+  TAREA 2 - CONFIGURACIÓN OSPF MULTIÁREA EN GNS3
+  Universidad Católica Andrés Bello - Telemática 2
+  Semestre 202625
+================================================================
+
+TOPOLOGÍA REAL DEL GRUPO:
+  R1 - Central      → IR  → Área 1
+  R2 - Ala_Este     → ABR → Áreas 1 y 2  (R4 y R5 cuelgan de R2)
+  R3 - Ala_Oeste    → ABR → Áreas 0 y 1  (R6 y R7 cuelgan de R3)
+  R4 - N_Este       → IR  → Área 2
+  R5 - S_Este       → IR  → Área 2
+  R6 - N_Oeste      → BR  → Área 0
+  R7 - S_Oeste      → BR  → Área 0
+  R8 - ISP/ASBR     → ASBR→ Área 0 + Externa
+
+VIRTUAL-LINK: entre R2 (2.2.2.2) y R3 (3.3.3.3) pasando por Área 1
+  → R2 lo necesita para conectar el Área 2 al backbone (Área 0)
+  → R3 es el punto de tránsito porque toca el Área 0 directamente
+
+INTERFACES REALES (c3725 con WIC-2T):
+  Seriales: Se0/0, Se0/1  (WIC-2T en slot wic0)
+  FastEth:  f0/0, f0/1    (GT96100-FE en slot0)
+  FastEth:  f1/0           (NM-1FE-TX en slot1, solo en R1,R4,R5,R6,R7)
+
+PREREQUISITO: rutas estáticas de Tarea 1 ya borradas.
+              Verificar con: show ip route | include ^S
+              (no debe devolver nada)
+
+================================================================
+  ORDEN DE CONFIGURACIÓN RECOMENDADO
+================================================================
+
+  1. R1  → establece la base del Área 1
+  2. R3  → conecta Área 0 con Área 1 + configura su lado del VL
+  3. R2  → conecta Área 1 con Área 2 + configura su lado del VL
+  4. R6  → Área 0 Norte
+  5. R7  → Área 0 Sur
+  6. R4  → Área 2 Norte
+  7. R5  → Área 2 Sur
+  8. R8  → ASBR último (distribuye ruta default cuando hay adyacencias)
+
+================================================================
+
+
+----------------------------------------------------------------
+PASO 1 - R1 CENTRAL
+Router-ID: 1.1.1.1 | IR | Área 1
+Next-hops conocidos: 20.118.216.1 (→R2), 20.118.216.5 (→R3)
+----------------------------------------------------------------
+
+enable
+configure terminal
+hostname R1-Central
+router ospf 1
+ router-id 1.1.1.1
+ network 20.118.224.0 0.0.31.255 area 1
+ network 20.118.208.0 0.0.7.255 area 1
+ network 20.118.112.0 0.0.15.255 area 1
+ network 20.118.216.0 0.0.0.3 area 1
+ network 20.118.216.4 0.0.0.3 area 1
+ network 20.118.216.24 0.0.0.3 area 1
+ passive-interface f0/0
+ passive-interface f0/1
+ passive-interface f1/0
+end
+copy running-config startup-config
+
+show ip ospf neighbor
+
+
+----------------------------------------------------------------
+PASO 2 - R3 ALA_OESTE
+Router-ID: 3.3.3.3 | ABR | Áreas 0 y 1
+Conecta: Área 0 (hacia R6 y R7) + Área 1 (hacia R1)
+Virtual-Link: tránsito por Área 1 hacia R2 (2.2.2.2)
+Interfaces conocidas: Se0/0 (Área 0→R6), Se0/2 (Área 0→R7), Se0/1 (Área 1→R1)
+----------------------------------------------------------------
+
+enable
+configure terminal
+hostname R3-AlaOeste
+router ospf 1
+ router-id 3.3.3.3
+ network 20.118.216.16 0.0.0.3 area 0
+ network 20.118.216.20 0.0.0.3 area 0
+ network 20.118.216.4 0.0.0.3 area 1
+ area 1 virtual-link 2.2.2.2
+end
+copy running-config startup-config
+
+show ip ospf neighbor
+
+
+----------------------------------------------------------------
+PASO 3 - R2 ALA_ESTE
+Router-ID: 2.2.2.2 | ABR | Áreas 1 y 2
+Conecta: Área 1 (hacia R1) + Área 2 (hacia R4 y R5)
+Virtual-Link: usa Área 1 como tránsito hacia R3 (3.3.3.3)
+Interfaces conocidas: Se0/0 (Área 1→R1), Se0/1 (Área 2→R4), Se0/2 (Área 2→R5)
+----------------------------------------------------------------
+
+enable
+configure terminal
+hostname R2-AlaEste
+router ospf 1
+ router-id 2.2.2.2
+ network 20.118.216.0 0.0.0.3 area 1
+ network 20.118.216.8 0.0.0.3 area 2
+ network 20.118.216.12 0.0.0.3 area 2
+ area 1 virtual-link 3.3.3.3
+end
+copy running-config startup-config
+
+show ip ospf neighbor
+show ip ospf virtual-links
+
+
+----------------------------------------------------------------
+PASO 4 - R6 N_OESTE
+Router-ID: 6.6.6.6 | BR + IR | Área 0
+Next-hop de R3 hacia R6: 20.118.216.17 → R6 tiene .18 ó .17
+----------------------------------------------------------------
+
+enable
+configure terminal
+hostname R6-NOeste
+router ospf 1
+ router-id 6.6.6.6
+ network 20.118.216.16 0.0.0.3 area 0
+ network 20.118.0.0 0.0.31.255 area 0
+ network 20.118.64.0 0.0.15.255 area 0
+ network 20.118.96.0 0.0.7.255 area 0
+ passive-interface f0/0
+ passive-interface f0/1
+ passive-interface f1/0
+end
+copy running-config startup-config
+
+show ip ospf neighbor
+
+
+----------------------------------------------------------------
+PASO 5 - R7 S_OESTE
+Router-ID: 7.7.7.7 | BR + IR | Área 0
+Next-hop de R3 hacia R7: 20.118.216.21 → R7 tiene .22 ó .21
+----------------------------------------------------------------
+
+enable
+configure terminal
+hostname R7-SOeste
+router ospf 1
+ router-id 7.7.7.7
+ network 20.118.216.20 0.0.0.3 area 0
+ network 20.118.32.0 0.0.31.255 area 0
+ network 20.118.80.0 0.0.15.255 area 0
+ network 20.118.104.0 0.0.7.255 area 0
+ passive-interface f0/0
+ passive-interface f0/1
+ passive-interface f1/0
+end
+copy running-config startup-config
+
+show ip ospf neighbor
+
+
+----------------------------------------------------------------
+PASO 6 - R4 N_ESTE
+Router-ID: 4.4.4.4 | IR | Área 2
+Next-hop hacia R2: 20.118.216.9 → R4 tiene .10 ó .9
+----------------------------------------------------------------
+
+enable
+configure terminal
+hostname R4-NEste
+router ospf 1
+ router-id 4.4.4.4
+ network 20.118.216.8 0.0.0.3 area 2
+ network 20.118.160.0 0.0.15.255 area 2
+ network 20.118.128.0 0.0.15.255 area 2
+ network 20.118.192.0 0.0.7.255 area 2
+ passive-interface f0/0
+ passive-interface f0/1
+ passive-interface f1/0
+end
+copy running-config startup-config
+
+show ip ospf neighbor
+
+
+----------------------------------------------------------------
+PASO 7 - R5 S_ESTE
+Router-ID: 5.5.5.5 | IR | Área 2
+Next-hop hacia R2: 20.118.216.13 → R5 tiene .14 ó .13
+----------------------------------------------------------------
+
+enable
+configure terminal
+hostname R5-SEste
+router ospf 1
+ router-id 5.5.5.5
+ network 20.118.216.12 0.0.0.3 area 2
+ network 20.118.176.0 0.0.15.255 area 2
+ network 20.118.144.0 0.0.15.255 area 2
+ network 20.118.200.0 0.0.7.255 area 2
+ passive-interface f0/0
+ passive-interface f0/1
+ passive-interface f1/0
+end
+copy running-config startup-config
+
+show ip ospf neighbor
+
+
+----------------------------------------------------------------
+PASO 8 - R8 ISP / ASBR  (configurar de último)
+Router-ID: 8.8.8.8 | ASBR + BR | Área 0 + Externa
+Next-hop de R1 hacia R8: 20.118.216.26 → enlace /30 con R1
+----------------------------------------------------------------
+
+enable
+configure terminal
+hostname R8-ISP-ASBR
+ip classless
+ip route 0.0.0.0 0.0.0.0 f0/0
+router ospf 1
+ router-id 8.8.8.8
+ network 20.118.216.24 0.0.0.3 area 0
+ default-information originate
+end
+copy running-config startup-config
+
+show ip ospf neighbor
+show ip route
+
+
+================================================================
+  PARTE 7 - SUMARIZACIÓN INTER-ÁREA
+  (ejecutar DESPUÉS de confirmar adyacencias FULL)
+================================================================
+
+----------------------------------------------------------------
+R2 - ALA_ESTE  →  resume redes del Área 2
+----------------------------------------------------------------
+
+configure terminal
+router ospf 1
+ area 2 range 20.118.128.0 255.255.192.0
+ area 2 range 20.118.192.0 255.255.240.0
+end
+copy running-config startup-config
+
+
+----------------------------------------------------------------
+R3 - ALA_OESTE  →  resume redes del Área 0
+----------------------------------------------------------------
+
+configure terminal
+router ospf 1
+ area 0 range 20.118.0.0 255.255.192.0
+ area 0 range 20.118.64.0 255.255.224.0
+ area 0 range 20.118.96.0 255.255.240.0
+end
+copy running-config startup-config
+
+
+================================================================
+  PARTE 9 - SNMP  (ejecutar en TODOS los routers)
+================================================================
+
+configure terminal
+ snmp-server community admin RO
+ snmp-server contact Telematica2-UCAB
+ snmp-server location Laboratorio-GNS3
+end
+copy running-config startup-config
+
+
+================================================================
+  COMANDOS DE VERIFICACIÓN POR PUNTO DE TAREA
+================================================================
+
+! PUNTO 4.1 - Verificar configuración OSPF y áreas
+show ip protocols
+
+! PUNTO 4.2 - Verificar adyacencias (estado debe ser FULL)
+show ip ospf neighbor
+
+! PUNTO 4.3 - Costo por interfaz y ABR/ASBR conocidos
+show ip ospf interface brief
+show ip ospf border-routers
+
+! PUNTO 5 - Tabla de rutas OSPF (O, O IA, O*E2)
+show ip route ospf
+
+! PUNTO 6 - Base de datos LSDB
+show ip ospf database
+
+! PUNTO 7 (post-sumarización) - Repetir puntos 5 y 6
+show ip route ospf
+show ip ospf database
+
+! PUNTO 8 - Conectividad extremo a extremo
+ping 20.118.X.X
+traceroute 20.118.X.X
+
+! PUNTO 9 - SNMP
+show snmp
+show snmp community
+
+! VIRTUAL-LINK - Verificar que esté UP
+show ip ospf virtual-links
+
+================================================================
+  CHECKLIST DE ADYACENCIAS ESPERADAS
+================================================================
+
+  R1 ↔ R2  (Área 1) → FULL
+  R1 ↔ R3  (Área 1) → FULL
+  R2 ↔ R3  (Virtual-Link, Área 1 como tránsito) → FULL
+  R3 ↔ R6  (Área 0) → FULL
+  R3 ↔ R7  (Área 0) → FULL
+  R2 ↔ R4  (Área 2) → FULL
+  R2 ↔ R5  (Área 2) → FULL
+  R8 ↔ R1  (Área 0→1, según enlace) → FULL
+
+================================================================
